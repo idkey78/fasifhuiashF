@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
 
 local player = Players.LocalPlayer
@@ -21,10 +22,12 @@ end
 -- Settings & States
 -- ========================================================
 local FARM_RADIUS = 150
+local FLY_SPEED = 75 -- Швидкість плавного польоту ( studs/sec )
 local isFarming = false
 local noclipEnabled = false
 local infJumpEnabled = false
 local isBossPhase = false
+local isMoving = false
 
 -- ========================================================
 -- GUI Creation
@@ -39,8 +42,8 @@ if not successCore then screenGui.Parent = playerGui end
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 320, 0, 430)
-mainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+mainFrame.Size = UDim2.new(0, 320, 0, 460)
+mainFrame.Position = UDim2.new(0.05, 0, 0.25, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
@@ -56,7 +59,6 @@ frameStroke.Thickness = 1.5
 frameStroke.Color = Color3.fromRGB(120, 60, 180)
 frameStroke.Parent = mainFrame
 
--- Верхня панель (TopBar)
 local topBar = Instance.new("Frame")
 topBar.Size = UDim2.new(1, 0, 0, 38)
 topBar.BackgroundColor3 = Color3.fromRGB(34, 34, 40)
@@ -67,9 +69,9 @@ local topTitle = Instance.new("TextLabel")
 topTitle.Size = UDim2.new(1, -50, 1, 0)
 topTitle.Position = UDim2.new(0, 12, 0, 0)
 topTitle.BackgroundTransparency = 1
-topTitle.Text = "Custom Game Hub | Halloween"
+topTitle.Text = "Custom Game Hub | Bypass AntiCheat"
 topTitle.TextColor3 = Color3.fromRGB(225, 205, 255)
-topTitle.TextSize = 14
+topTitle.TextSize = 13
 topTitle.Font = Enum.Font.GothamBold
 topTitle.TextXAlignment = Enum.TextXAlignment.Left
 topTitle.Parent = topBar
@@ -106,7 +108,7 @@ layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     scrollContent.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 15)
 end)
 
--- Плавне перетягування
+-- Перетягування вікна
 local isDragging, dragStart, startPos
 topBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -135,13 +137,15 @@ closeBtn.MouseButton1Click:Connect(function()
         mainFrame:TweenSize(UDim2.new(0, 320, 0, 38), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
         scrollContent.Visible = false
     else
-        mainFrame:TweenSize(UDim2.new(0, 320, 0, 430), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+        mainFrame:TweenSize(UDim2.new(0, 320, 0, 460), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
         task.wait(0.15)
         scrollContent.Visible = true
     end
 end)
 
--- Допоміжні конструктори елементів UI
+-- ========================================================
+-- Конструктори елементів меню
+-- ========================================================
 local function createCategory(name)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 0, 20)
@@ -222,10 +226,40 @@ local function createInput(placeholder, defaultVal, callback)
 end
 
 -- ========================================================
--- Логіка пошуку локацій та боса
+-- Система плавного польоту (Байпас Античита)
 -- ========================================================
+local function flyTo(targetCFrame)
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
 
--- Пошук партів телепортації за скріншотами
+    isMoving = true
+
+    -- Створюємо підтримку гравця у повітрі
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.zero
+    bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+    bodyVelocity.Parent = root
+
+    local distance = (root.Position - targetCFrame.Position).Magnitude
+    local duration = distance / FLY_SPEED
+    if duration < 0.2 then duration = 0.2 end
+
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
+    
+    tween:Play()
+    tween.Completed:Wait()
+
+    if bodyVelocity then
+        bodyVelocity:Destroy()
+    end
+    isMoving = false
+end
+
+-- ========================================================
+-- Пошук об'єктів гри
+-- ========================================================
 local function getBossPlinth()
     local plaza = Workspace:FindFirstChild("PumpkinPlaza", true)
     if plaza then
@@ -234,7 +268,6 @@ local function getBossPlinth()
             return plinth
         end
     end
-    -- Запасний пошук
     for _, part in ipairs(Workspace:GetDescendants()) do
         if part.Name == "PlinthTop" and part:IsA("BasePart") then
             return part
@@ -251,7 +284,6 @@ local function getFarmGround()
             return ground
         end
     end
-    -- Запасний пошук
     for _, part in ipairs(Workspace:GetDescendants()) do
         if part.Name == "FarmGround" and part:IsA("BasePart") then
             return part
@@ -272,16 +304,6 @@ local function getPumpkinBoss()
     return nil
 end
 
-local function teleportTo(part, yOffset)
-    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if root and part then
-        root.CFrame = part.CFrame + Vector3.new(0, yOffset or 3, 0)
-    end
-end
-
--- ========================================================
--- Функції кліку та автофарму
--- ========================================================
 local function clickTarget(model)
     local detector = model:FindFirstChildWhichIsA("ClickDetector", true)
     if typeof(fireclickdetector) == "function" and detector then
@@ -355,23 +377,24 @@ local function getTreesInRadius()
 end
 
 -- ========================================================
--- Основний цикл Авто-фарму з авто-босом
+-- Основний цикл: Автофарм + Політ до Боса
 -- ========================================================
 local function startFarmingLoop()
     while isFarming do
-        -- 1. Перевірка наявності БОСА
         local boss = getPumpkinBoss()
+
+        -- 1. Спавн Боса
         if boss and boss:IsDescendantOf(Workspace) then
             isBossPhase = true
             
-            -- Телепорт до PlinthTop
             local plinth = getBossPlinth()
             if plinth then
-                teleportTo(plinth, 4)
+                -- Летимо трохи вище п'єдесталу (+4 studs), щоб стати на нього
+                flyTo(plinth.CFrame + Vector3.new(0, 4, 0))
             end
-            task.wait(0.3)
+            task.wait(0.2)
 
-            -- Клікаємо по босу, поки він живий
+            -- Клікаємо по босу, доки він існує
             while isFarming and boss:IsDescendantOf(Workspace) do
                 local hp = boss:GetAttribute("HP")
                 if hp and hp <= 0 then break end
@@ -380,18 +403,18 @@ local function startFarmingLoop()
                 task.wait(0.25)
             end
 
-            -- Боса знищено -> телепорт на базу (FarmGround)
+            -- Боса знищено -> летимо назад на FarmGround
             local ground = getFarmGround()
             if ground then
-                teleportTo(ground, 3.5)
+                flyTo(ground.CFrame + Vector3.new(0, 3.5, 0))
             end
             task.wait(0.5)
 
             isBossPhase = false
         end
 
-        -- 2. Звичайний фарм (працює, якщо боса немає)
-        if not isBossPhase then
+        -- 2. Звичайний фарм дерев
+        if not isBossPhase and not isMoving then
             local trees = getTreesInRadius()
             if #trees > 0 then
                 local targetTree = trees[1]
@@ -399,7 +422,6 @@ local function startFarmingLoop()
                 local attempts = 0
 
                 while isFarming and targetTree:IsDescendantOf(Workspace) do
-                    -- Якщо під час фарму дерева спавниться бос, перериваємось
                     if getPumpkinBoss() then break end
 
                     local currentHp = targetTree:GetAttribute("HP")
@@ -426,28 +448,35 @@ local function startFarmingLoop()
 end
 
 -- ========================================================
--- Наповнення меню елементами
+-- Наповнення меню
 -- ========================================================
 createCategory("Halloween Event")
 
-createToggle("Авто-фарм + Авто-Бос", false, function(state)
+createToggle("Авто-фарм + Авто-Бос (Fly)", false, function(state)
     isFarming = state
     if isFarming then
         startFarmingLoop()
     end
 end)
 
-createButton("ТП до Боса (PlinthTop)", function()
-    local plinth = getBossPlinth()
-    if plinth then
-        teleportTo(plinth, 4)
+createInput("Швидкість польоту (FlySpeed)", FLY_SPEED, function(val)
+    local num = tonumber(val)
+    if num and num > 10 then
+        FLY_SPEED = num
     end
 end)
 
-createButton("ТП на базу (FarmGround)", function()
+createButton("Полетіти до Боса (PlinthTop)", function()
+    local plinth = getBossPlinth()
+    if plinth then
+        flyTo(plinth.CFrame + Vector3.new(0, 4, 0))
+    end
+end)
+
+createButton("Полетіти на базу (FarmGround)", function()
     local ground = getFarmGround()
     if ground then
-        teleportTo(ground, 3.5)
+        flyTo(ground.CFrame + Vector3.new(0, 3.5, 0))
     end
 end)
 
@@ -476,9 +505,9 @@ createToggle("Infinite Jump (Стрибки)", false, function(state)
     infJumpEnabled = state
 end)
 
--- Обробка Noclip
+-- Noclip: активний при ввімкненому перемикачі АБО під час польоту
 RunService.Stepped:Connect(function()
-    if noclipEnabled and player.Character then
+    if (noclipEnabled or isMoving) and player.Character then
         for _, part in pairs(player.Character:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
@@ -487,7 +516,7 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Обробка Infinite Jump
+-- Infinite Jump
 UserInputService.JumpRequest:Connect(function()
     if infJumpEnabled and player.Character and player.Character:FindFirstChild("Humanoid") then
         player.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
