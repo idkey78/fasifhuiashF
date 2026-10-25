@@ -1,299 +1,398 @@
--- Сервіси
+-- ========================================================
+-- Services & Core Setup
+-- ========================================================
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local camera = Workspace.CurrentCamera
 
--- Захист від повторного запуску
-if playerGui:FindFirstChild("AutoClickerGUI") then
-    playerGui.AutoClickerGUI:Destroy()
+-- Захист від подвійного запуску
+if playerGui:FindFirstChild("UniversalHubGui") then
+    playerGui.UniversalHubGui:Destroy()
 end
 
--- Створення GUI
-local gui = Instance.new("ScreenGui")
-gui.Name = "AutoClickerGUI"
-local successCore = pcall(function() gui.Parent = CoreGui end)
-if not successCore then gui.Parent = playerGui end
+-- ========================================================
+-- Settings & States
+-- ========================================================
+local FARM_RADIUS = 150
+local isFarming = false
+local noclipEnabled = false
+local infJumpEnabled = false
 
--- Головне вікно
-local container = Instance.new("Frame")
-container.Name = "MainFrame"
-container.Size = UDim2.new(0, 340, 0, 400)
-container.Position = UDim2.new(0.5, -170, 0.5, -200)
-container.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-container.BorderSizePixel = 0
-container.Active = true
-container.ClipsDescendants = true
-container.Parent = gui
+-- ========================================================
+-- GUI Creation
+-- ========================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "UniversalHubGui"
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 9999
 
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = container
+local successCore = pcall(function() screenGui.Parent = CoreGui end)
+if not successCore then screenGui.Parent = playerGui end
 
-local title = Instance.new("TextLabel")
-title.Text = "UI Auto Clicker (Universal)"
-title.Size = UDim2.new(1, 0, 0, 40)
-title.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.Parent = container
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 320, 0, 420)
+mainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
 
--- Плавне перетягування вікна
-local dragging, dragInput, dragStart, startPos
-local function update(input)
-    local delta = input.Position - dragStart
-    container.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-end
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 10)
+frameCorner.Parent = mainFrame
 
-title.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = container.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
+local frameStroke = Instance.new("UIStroke")
+frameStroke.Thickness = 1.5
+frameStroke.Color = Color3.fromRGB(120, 60, 180)
+frameStroke.Parent = mainFrame
+
+-- Верхня панель (TopBar)
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 38)
+topBar.BackgroundColor3 = Color3.fromRGB(34, 34, 40)
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
+
+local topTitle = Instance.new("TextLabel")
+topTitle.Size = UDim2.new(1, -50, 1, 0)
+topTitle.Position = UDim2.new(0, 12, 0, 0)
+topTitle.BackgroundTransparency = 1
+topTitle.Text = "Custom Game Hub | v1.0"
+topTitle.TextColor3 = Color3.fromRGB(225, 205, 255)
+topTitle.TextSize = 14
+topTitle.Font = Enum.Font.GothamBold
+topTitle.TextXAlignment = Enum.TextXAlignment.Left
+topTitle.Parent = topBar
+
+-- Кнопка закриття/згортання
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -32, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+closeBtn.Text = "—"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = topBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 6)
+closeCorner.Parent = closeBtn
+
+-- Скрол-список для кнопок і модулів
+local scrollContent = Instance.new("ScrollingFrame")
+scrollContent.Size = UDim2.new(1, -16, 1, -50)
+scrollContent.Position = UDim2.new(0, 8, 0, 44)
+scrollContent.BackgroundTransparency = 1
+scrollContent.BorderSizePixel = 0
+scrollContent.ScrollBarThickness = 3
+scrollContent.Parent = mainFrame
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 8)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = scrollContent
+
+layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    scrollContent.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 15)
 end)
 
-title.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
+-- Плавне перетягування (Drag)
+local isDragging, dragStart, startPos
+topBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                isDragging = false
+            end
+        end)
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        update(input)
+    if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
 
--- Поле пошуку
-local searchInput = Instance.new("TextBox")
-searchInput.PlaceholderText = "Пошук назви або парента..."
-searchInput.Size = UDim2.new(1, -20, 0, 32)
-searchInput.Position = UDim2.new(0, 10, 0, 50)
-searchInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-searchInput.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-searchInput.Font = Enum.Font.Gotham
-searchInput.TextSize = 13
-searchInput.BorderSizePixel = 0
-searchInput.Parent = container
+local isMinimized = false
+closeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        mainFrame:TweenSize(UDim2.new(0, 320, 0, 38), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+        scrollContent.Visible = false
+    else
+        mainFrame:TweenSize(UDim2.new(0, 320, 0, 420), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+        task.wait(0.15)
+        scrollContent.Visible = true
+    end
+end)
 
--- Інформація про обрану кнопку
-local selectedLabel = Instance.new("TextLabel")
-selectedLabel.Text = "Обрано: немає\nParent: немає"
-selectedLabel.Size = UDim2.new(1, -20, 0, 35)
-selectedLabel.Position = UDim2.new(0, 10, 0, 85)
-selectedLabel.TextColor3 = Color3.fromRGB(200, 200, 100)
-selectedLabel.BackgroundTransparency = 1
-selectedLabel.Font = Enum.Font.GothamMedium
-selectedLabel.TextSize = 11
-selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
-selectedLabel.TextYAlignment = Enum.TextYAlignment.Top
-selectedLabel.Parent = container
+-- ========================================================
+-- Конструктори елементів інтерфейсу
+-- ========================================================
+local function createCategory(name)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 20)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "— " .. string.upper(name) .. " —"
+    lbl.TextColor3 = Color3.fromRGB(150, 150, 170)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 11
+    lbl.Parent = scrollContent
+end
 
--- Список кнопок
-local resultsList = Instance.new("ScrollingFrame")
-resultsList.Size = UDim2.new(1, -20, 0, 135)
-resultsList.Position = UDim2.new(0, 10, 0, 125)
-resultsList.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
-resultsList.BorderSizePixel = 0
-resultsList.ScrollBarThickness = 4
-resultsList.Parent = container
+local function createToggle(name, defaultState, callback)
+    local state = defaultState or false
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 40)
+    btn.BackgroundColor3 = state and Color3.fromRGB(46, 180, 87) or Color3.fromRGB(180, 50, 50)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.Text = name .. ": " .. (state and "УВІМК" or "ВИМК")
+    btn.BorderSizePixel = 0
+    btn.Parent = scrollContent
 
-local listLayout = Instance.new("UIListLayout")
-listLayout.Parent = resultsList
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Padding = UDim.new(0, 2)
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    btnCorner.Parent = btn
 
--- Поле затримки
-local intervalInput = Instance.new("TextBox")
-intervalInput.PlaceholderText = "Затримка в сек (напр: 0.2)"
-intervalInput.Text = "0.2"
-intervalInput.Size = UDim2.new(1, -20, 0, 32)
-intervalInput.Position = UDim2.new(0, 10, 0, 270)
-intervalInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-intervalInput.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-intervalInput.Font = Enum.Font.Gotham
-intervalInput.TextSize = 13
-intervalInput.BorderSizePixel = 0
-intervalInput.Parent = container
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.BackgroundColor3 = state and Color3.fromRGB(46, 180, 87) or Color3.fromRGB(180, 50, 50)
+        btn.Text = name .. ": " .. (state and "УВІМК" or "ВИМК")
+        task.spawn(callback, state)
+    end)
+    return btn
+end
 
--- Кнопка старт/стоп
-local toggleButton = Instance.new("TextButton")
-toggleButton.Text = "Увімкнути"
-toggleButton.Size = UDim2.new(1, -20, 0, 36)
-toggleButton.Position = UDim2.new(0, 10, 0, 312)
-toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 100)
-toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.Font = Enum.Font.GothamBold
-toggleButton.TextSize = 15
-toggleButton.BorderSizePixel = 0
-toggleButton.Parent = container
+local function createButton(name, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    btn.TextColor3 = Color3.fromRGB(230, 230, 230)
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 13
+    btn.Text = name
+    btn.BorderSizePixel = 0
+    btn.Parent = scrollContent
 
--- Додатковий статус кліків
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Text = "Статус: Очікування"
-statusLabel.Size = UDim2.new(1, -20, 0, 20)
-statusLabel.Position = UDim2.new(0, 10, 0, 360)
-statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextSize = 11
-statusLabel.Parent = container
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    btnCorner.Parent = btn
 
--- Універсальне натискання
-local targetButton = nil
-local isRunning = false
-local clickCount = 0
+    btn.MouseButton1Click:Connect(function()
+        task.spawn(callback)
+    end)
+    return btn
+end
 
-local function clickButton(btn)
-    if not btn or not btn.Parent then return end
+local function createInput(placeholder, defaultVal, callback)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 34)
+    box.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 13
+    box.PlaceholderText = placeholder
+    box.Text = tostring(defaultVal or "")
+    box.BorderSizePixel = 0
+    box.Parent = scrollContent
 
-    -- 1. Метод getconnections (викликає реальні підключені функції гри)
-    if getconnections then
-        local events = {"MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up"}
-        for _, evName in ipairs(events) do
-            pcall(function()
-                for _, conn in pairs(getconnections(btn[evName])) do
-                    if conn.Function then
-                        conn.Function()
-                    elseif conn.Fire then
-                        conn:Fire()
+    local boxCorner = Instance.new("UICorner")
+    boxCorner.CornerRadius = UDim.new(0, 8)
+    boxCorner.Parent = box
+
+    box.FocusLost:Connect(function()
+        callback(box.Text)
+    end)
+    return box
+end
+
+-- ========================================================
+-- Логіка Halloween Авто-фарму
+-- ========================================================
+local function getTreesInRadius()
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return {} end
+
+    local myId = tostring(player.UserId)
+    local foundTrees = {}
+
+    local beaverProto = Workspace:FindFirstChild("BeaverPrototype")
+    local treesFolder = beaverProto and beaverProto:FindFirstChild("Trees")
+    local pool = treesFolder and treesFolder:GetChildren() or Workspace:GetDescendants()
+
+    for _, item in ipairs(pool) do
+        if item:IsA("Model") and string.find(item.Name, "Halloween") then
+            local detector = item:FindFirstChildWhichIsA("ClickDetector", true)
+            if detector then
+                local hp = item:GetAttribute("HP")
+                if hp == nil or hp > 0 then
+                    local part = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+                    if part then
+                        local distance = (part.Position - root.Position).Magnitude
+                        if distance <= FARM_RADIUS then
+                            local owner = tostring(item:GetAttribute("ForestOwner") or "")
+                            local isMine = (owner == myId) or string.find(item.Name, myId) ~= nil
+
+                            table.insert(foundTrees, {
+                                model = item,
+                                dist = distance,
+                                mine = isMine
+                            })
+                        end
                     end
                 end
-            end)
+            end
         end
     end
 
-    -- 2. Метод firesignal
-    if firesignal then
-        pcall(function() firesignal(btn.MouseButton1Down) end)
-        pcall(function() firesignal(btn.MouseButton1Click) end)
-        pcall(function() firesignal(btn.Activated) end)
-        pcall(function() firesignal(btn.MouseButton1Up) end)
-    end
-
-    -- 3. Фізична емуляція кліку по центру кнопки мишкою (VirtualUser)
-    pcall(function()
-        local pos = btn.AbsolutePosition
-        local size = btn.AbsoluteSize
-        local center = Vector2.new(pos.X + size.X / 2, pos.Y + size.Y / 2)
-        VirtualUser:Button1Down(center)
-        task.wait(0.01)
-        VirtualUser:Button1Up(center)
+    table.sort(foundTrees, function(a, b)
+        if a.mine ~= b.mine then return a.mine end
+        return a.dist < b.dist
     end)
+
+    local result = {}
+    for _, entry in ipairs(foundTrees) do
+        table.insert(result, entry.model)
+    end
+    return result
 end
 
--- Пошук
-local function searchButtons(query)
-    for _, child in ipairs(resultsList:GetChildren()) do
-        if child:IsA("TextButton") then
-            child:Destroy()
-        end
+local function clickTree(tree)
+    local detector = tree:FindFirstChildWhichIsA("ClickDetector", true)
+    if typeof(fireclickdetector) == "function" and detector then
+        fireclickdetector(detector)
+        return true
     end
 
-    if query == "" then 
-        resultsList.CanvasSize = UDim2.new(0, 0, 0, 0)
-        return 
+    local targetPart = tree.PrimaryPart or tree:FindFirstChildWhichIsA("BasePart")
+    if not targetPart then return false end
+
+    camera.CFrame = CFrame.new(camera.CFrame.Position, targetPart.Position)
+    task.wait(0.04)
+
+    local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+    if onScreen then
+        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 0)
+        task.wait(0.04)
+        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 0)
+        return true
     end
-
-    local count = 0
-    local qLower = string.lower(query)
-
-    for _, obj in ipairs(playerGui:GetDescendants()) do
-        if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and not obj:IsDescendantOf(gui) then
-            local parentName = obj.Parent and obj.Parent.Name or "None"
-            local nameMatch = string.find(string.lower(obj.Name), qLower, 1, true)
-            local parentMatch = string.find(string.lower(parentName), qLower, 1, true)
-            local textMatch = false
-            if obj:IsA("TextButton") then
-                textMatch = string.find(string.lower(obj.Text), qLower, 1, true)
-            end
-
-            if nameMatch or textMatch or parentMatch then
-                count = count + 1
-                local itemBtn = Instance.new("TextButton")
-                itemBtn.Size = UDim2.new(1, 0, 0, 30)
-                itemBtn.BackgroundColor3 = Color3.fromRGB(38, 38, 46)
-                itemBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-                itemBtn.Font = Enum.Font.Gotham
-                itemBtn.TextSize = 11
-                itemBtn.TextXAlignment = Enum.TextXAlignment.Left
-                itemBtn.BorderSizePixel = 0
-                
-                local display = obj.Name
-                if obj:IsA("TextButton") and obj.Text ~= "" then
-                    display = display .. " [" .. obj.Text .. "]"
-                end
-                itemBtn.Text = "  " .. display .. " | Parent: " .. parentName
-                itemBtn.Parent = resultsList
-
-                itemBtn.MouseButton1Click:Connect(function()
-                    targetButton = obj
-                    local fullParent = obj.Parent and obj.Parent:GetFullName() or "Немає"
-                    selectedLabel.Text = "Обрано: " .. obj.Name .. "\nParent: " .. fullParent
-                    selectedLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-                end)
-            end
-        end
-    end
-
-    resultsList.CanvasSize = UDim2.new(0, 0, 0, count * 32)
+    return false
 end
 
-searchInput:GetPropertyChangedSignal("Text"):Connect(function()
-    searchButtons(searchInput.Text)
-end)
+local function startFarmingLoop()
+    while isFarming do
+        local trees = getTreesInRadius()
+        if #trees > 0 then
+            local targetTree = trees[1]
+            local startHp = targetTree:GetAttribute("HP") or 0
+            local attempts = 0
 
--- Робота перемикача
-toggleButton.MouseButton1Click:Connect(function()
-    if isRunning then
-        isRunning = false
-        toggleButton.Text = "Увімкнути"
-        toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 100)
-        statusLabel.Text = "Статус: Зупинено"
-    else
-        if not targetButton or not targetButton.Parent then
-            selectedLabel.Text = "Помилка: Виберіть кнопку!"
-            selectedLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-            return
-        end
-
-        local cd = tonumber(intervalInput.Text)
-        if not cd or cd < 0.01 then
-            cd = 0.1
-            intervalInput.Text = "0.1"
-        end
-
-        isRunning = true
-        clickCount = 0
-        toggleButton.Text = "Зупинити"
-        toggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-
-        task.spawn(function()
-            while isRunning do
-                if targetButton and targetButton.Parent then
-                    clickButton(targetButton)
-                    clickCount = clickCount + 1
-                    statusLabel.Text = "Статус: Натискань надіслано: " .. clickCount
-                else
-                    isRunning = false
-                    toggleButton.Text = "Увімкнути"
-                    toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 100)
-                    selectedLabel.Text = "Кнопка зникла!"
-                    selectedLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            while isFarming and targetTree:IsDescendantOf(Workspace) do
+                local currentHp = targetTree:GetAttribute("HP")
+                if not currentHp or currentHp <= 0 or (startHp > 0 and currentHp < startHp) then
                     break
                 end
-                task.wait(cd)
+                clickTree(targetTree)
+                attempts = attempts + 1
+                if attempts > 15 then break end
+                task.wait(0.25)
             end
-        end)
+
+            while isFarming and targetTree:IsDescendantOf(Workspace) do
+                local currentHp = targetTree:GetAttribute("HP")
+                if not currentHp or currentHp <= 0 then break end
+                task.wait(0.25)
+            end
+        end
+        task.wait(1)
+    end
+end
+
+-- ========================================================
+-- Наповнення меню функціями
+-- ========================================================
+
+-- Категорія: Фарм
+createCategory("Halloween Event")
+
+createToggle("Авто-фарм гарбузів/дерев", false, function(state)
+    isFarming = state
+    if isFarming then
+        startFarmingLoop()
+    end
+end)
+
+createButton("Телепорт до найближчого дерева", function()
+    local trees = getTreesInRadius()
+    if #trees > 0 then
+        local targetPart = trees[1].PrimaryPart or trees[1]:FindFirstChildWhichIsA("BasePart")
+        local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        if targetPart and root then
+            root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 3)
+        end
+    end
+end)
+
+-- Категорія: Гравець / Рух
+createCategory("Персонаж")
+
+createInput("Швидкість (WalkSpeed)", "16", function(val)
+    local num = tonumber(val)
+    if num and player.Character and player.Character:FindFirstChild("Humanoid") then
+        player.Character.Humanoid.WalkSpeed = num
+    end
+end)
+
+createInput("Стрибок (JumpPower)", "50", function(val)
+    local num = tonumber(val)
+    if num and player.Character and player.Character:FindFirstChild("Humanoid") then
+        player.Character.Humanoid.UseJumpPower = true
+        player.Character.Humanoid.JumpPower = num
+    end
+end)
+
+createToggle("Noclip (Крізь стіни)", false, function(state)
+    noclipEnabled = state
+end)
+
+createToggle("Infinite Jump (Стрибки у повітрі)", false, function(state)
+    infJumpEnabled = state
+end)
+
+-- Обробка Noclip у кожному кадрі
+RunService.Stepped:Connect(function()
+    if noclipEnabled and player.Character then
+        for _, part in pairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- Обробка Infinite Jump
+UserInputService.JumpRequest:Connect(function()
+    if infJumpEnabled and player.Character and player.Character:FindFirstChild("Humanoid") then
+        player.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end
 end)
