@@ -14,15 +14,14 @@ end
 -- Основний екран GUI
 local gui = Instance.new("ScreenGui")
 gui.Name = "AutoClickerGUI"
--- Якщо екзекутор дозволяє, поміщаємо в CoreGui для прихованості, інакше в PlayerGui
 local successCore = pcall(function() gui.Parent = CoreGui end)
 if not successCore then gui.Parent = playerGui end
 
 -- Головне вікно
 local container = Instance.new("Frame")
 container.Name = "MainFrame"
-container.Size = UDim2.new(0, 320, 0, 360)
-container.Position = UDim2.new(0.5, -160, 0.5, -180)
+container.Size = UDim2.new(0, 340, 0, 390)
+container.Position = UDim2.new(0.5, -170, 0.5, -195)
 container.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
 container.BorderSizePixel = 0
 container.Active = true
@@ -78,7 +77,7 @@ end)
 
 -- Поле пошуку кнопки
 local searchInput = Instance.new("TextBox")
-searchInput.PlaceholderText = "Пошук назви кнопки..."
+searchInput.PlaceholderText = "Пошук назви або парента..."
 searchInput.Size = UDim2.new(1, -20, 0, 32)
 searchInput.Position = UDim2.new(0, 10, 0, 50)
 searchInput.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -88,22 +87,23 @@ searchInput.TextSize = 13
 searchInput.BorderSizePixel = 0
 searchInput.Parent = container
 
--- Лейбл обраної кнопки
+-- Лейбл обраної кнопки (з інформацією про Parent)
 local selectedLabel = Instance.new("TextLabel")
-selectedLabel.Text = "Обрано: немає"
-selectedLabel.Size = UDim2.new(1, -20, 0, 20)
+selectedLabel.Text = "Обрано: немає\nParent: немає"
+selectedLabel.Size = UDim2.new(1, -20, 0, 35)
 selectedLabel.Position = UDim2.new(0, 10, 0, 85)
 selectedLabel.TextColor3 = Color3.fromRGB(200, 200, 100)
 selectedLabel.BackgroundTransparency = 1
 selectedLabel.Font = Enum.Font.GothamMedium
-selectedLabel.TextSize = 12
+selectedLabel.TextSize = 11
 selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectedLabel.TextYAlignment = Enum.TextYAlignment.Top
 selectedLabel.Parent = container
 
 -- Список результатів пошуку (ScrollingFrame)
 local resultsList = Instance.new("ScrollingFrame")
-resultsList.Size = UDim2.new(1, -20, 0, 130)
-resultsList.Position = UDim2.new(0, 10, 0, 110)
+resultsList.Size = UDim2.new(1, -20, 0, 135)
+resultsList.Position = UDim2.new(0, 10, 0, 125)
 resultsList.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
 resultsList.BorderSizePixel = 0
 resultsList.ScrollBarThickness = 4
@@ -119,7 +119,7 @@ local intervalInput = Instance.new("TextBox")
 intervalInput.PlaceholderText = "Затримка в сек (напр: 0.1)"
 intervalInput.Text = "0.5"
 intervalInput.Size = UDim2.new(1, -20, 0, 32)
-intervalInput.Position = UDim2.new(0, 10, 0, 250)
+intervalInput.Position = UDim2.new(0, 10, 0, 270)
 intervalInput.TextColor3 = Color3.fromRGB(255, 255, 255)
 intervalInput.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
 intervalInput.Font = Enum.Font.Gotham
@@ -131,7 +131,7 @@ intervalInput.Parent = container
 local toggleButton = Instance.new("TextButton")
 toggleButton.Text = "Увімкнути"
 toggleButton.Size = UDim2.new(1, -20, 0, 36)
-toggleButton.Position = UDim2.new(0, 10, 0, 295)
+toggleButton.Position = UDim2.new(0, 10, 0, 312)
 toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 100)
 toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleButton.Font = Enum.Font.GothamBold
@@ -139,15 +139,13 @@ toggleButton.TextSize = 15
 toggleButton.BorderSizePixel = 0
 toggleButton.Parent = container
 
--- Логіка вибору та кліку
+-- Логіка кліку
 local targetButton = nil
 local isRunning = false
 
--- Функція емуляції натискання кнопки
 local function clickButton(btn)
     if not btn or not btn.Parent then return end
     
-    -- Використання спеціальних методів екзекуторів
     if firesignal then
         firesignal(btn.MouseButton1Down)
         firesignal(btn.MouseButton1Click)
@@ -155,7 +153,6 @@ local function clickButton(btn)
     elseif btn:FindFirstChildOfClass("ClickDetector") then
         fireclickdetector(btn:FindFirstChildOfClass("ClickDetector"))
     else
-        -- Запасний варіант (працює якщо скрипт всередині контексту гри)
         pcall(function()
             for _, conn in pairs(getconnections(btn.MouseButton1Click)) do
                 conn:Fire()
@@ -164,9 +161,8 @@ local function clickButton(btn)
     end
 end
 
--- Функція оновлення списку знайдених кнопок
+-- Функція пошуку
 local function searchButtons(query)
-    -- Очищаємо попередні результати
     for _, child in ipairs(resultsList:GetChildren()) do
         if child:IsA("TextButton") then
             child:Destroy()
@@ -179,19 +175,22 @@ local function searchButtons(query)
     end
 
     local count = 0
-    -- Шукаємо всі кнопки в PlayerGui
+    local qLower = string.lower(query)
+
     for _, obj in ipairs(playerGui:GetDescendants()) do
         if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and not obj:IsDescendantOf(gui) then
-            local nameMatch = string.find(string.lower(obj.Name), string.lower(query), 1, true)
+            local parentName = obj.Parent and obj.Parent.Name or "None"
+            local nameMatch = string.find(string.lower(obj.Name), qLower, 1, true)
+            local parentMatch = string.find(string.lower(parentName), qLower, 1, true)
             local textMatch = false
             if obj:IsA("TextButton") then
-                textMatch = string.find(string.lower(obj.Text), string.lower(query), 1, true)
+                textMatch = string.find(string.lower(obj.Text), qLower, 1, true)
             end
 
-            if nameMatch or textMatch then
+            if nameMatch or textMatch or parentMatch then
                 count = count + 1
                 local itemBtn = Instance.new("TextButton")
-                itemBtn.Size = UDim2.new(1, 0, 0, 26)
+                itemBtn.Size = UDim2.new(1, 0, 0, 30)
                 itemBtn.BackgroundColor3 = Color3.fromRGB(38, 38, 46)
                 itemBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
                 itemBtn.Font = Enum.Font.Gotham
@@ -199,27 +198,29 @@ local function searchButtons(query)
                 itemBtn.TextXAlignment = Enum.TextXAlignment.Left
                 itemBtn.BorderSizePixel = 0
                 
+                -- Формуємо інформативний напис: назва, текст та його parent
                 local display = obj.Name
                 if obj:IsA("TextButton") and obj.Text ~= "" then
-                    display = display .. " [Текст: " .. obj.Text .. "]"
+                    display = display .. " [" .. obj.Text .. "]"
                 end
-                itemBtn.Text = "  " .. display
+                itemBtn.Text = "  " .. display .. " | Parent: " .. parentName
                 itemBtn.Parent = resultsList
 
-                -- Вибір кнопки при кліку зі списку
+                -- Вибір при кліку зі списку
                 itemBtn.MouseButton1Click:Connect(function()
                     targetButton = obj
-                    selectedLabel.Text = "Обрано: " .. obj.Name
+                    local fullParent = obj.Parent and obj.Parent:GetFullName() or "Немає"
+                    selectedLabel.Text = "Обрано: " .. obj.Name .. "\nParent: " .. fullParent
                     selectedLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
                 end)
             end
         end
     end
 
-    resultsList.CanvasSize = UDim2.new(0, 0, 0, count * 28)
+    resultsList.CanvasSize = UDim2.new(0, 0, 0, count * 32)
 end
 
--- Подія введення тексту в пошук
+-- Реакція на введення тексту в пошук
 searchInput:GetPropertyChangedSignal("Text"):Connect(function()
     searchButtons(searchInput.Text)
 end)
@@ -232,7 +233,7 @@ toggleButton.MouseButton1Click:Connect(function()
         toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 100)
     else
         if not targetButton or not targetButton.Parent then
-            selectedLabel.Text = "Помилка: Виберіть кнопку!"
+            selectedLabel.Text = "Помилка: Виберіть кнопку зі списку!"
             selectedLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
             return
         end
@@ -247,7 +248,6 @@ toggleButton.MouseButton1Click:Connect(function()
         toggleButton.Text = "Зупинити"
         toggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 
-        -- Фоновий цикл натискання
         task.spawn(function()
             while isRunning do
                 if targetButton and targetButton.Parent then
