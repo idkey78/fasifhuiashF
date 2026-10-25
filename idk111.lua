@@ -12,7 +12,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = Workspace.CurrentCamera
 
--- Захист від подвійного запуску
+-- Захист від повторного запуску
 if playerGui:FindFirstChild("UniversalHubGui") then
     playerGui.UniversalHubGui:Destroy()
 end
@@ -24,6 +24,7 @@ local FARM_RADIUS = 150
 local isFarming = false
 local noclipEnabled = false
 local infJumpEnabled = false
+local isBossPhase = false
 
 -- ========================================================
 -- GUI Creation
@@ -38,7 +39,7 @@ if not successCore then screenGui.Parent = playerGui end
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 320, 0, 420)
+mainFrame.Size = UDim2.new(0, 320, 0, 430)
 mainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
 mainFrame.BorderSizePixel = 0
@@ -66,14 +67,13 @@ local topTitle = Instance.new("TextLabel")
 topTitle.Size = UDim2.new(1, -50, 1, 0)
 topTitle.Position = UDim2.new(0, 12, 0, 0)
 topTitle.BackgroundTransparency = 1
-topTitle.Text = "Custom Game Hub | v1.0"
+topTitle.Text = "Custom Game Hub | Halloween"
 topTitle.TextColor3 = Color3.fromRGB(225, 205, 255)
 topTitle.TextSize = 14
 topTitle.Font = Enum.Font.GothamBold
 topTitle.TextXAlignment = Enum.TextXAlignment.Left
 topTitle.Parent = topBar
 
--- Кнопка закриття/згортання
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 28, 0, 28)
 closeBtn.Position = UDim2.new(1, -32, 0, 5)
@@ -89,7 +89,6 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 6)
 closeCorner.Parent = closeBtn
 
--- Скрол-список для кнопок і модулів
 local scrollContent = Instance.new("ScrollingFrame")
 scrollContent.Size = UDim2.new(1, -16, 1, -50)
 scrollContent.Position = UDim2.new(0, 8, 0, 44)
@@ -107,7 +106,7 @@ layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     scrollContent.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 15)
 end)
 
--- Плавне перетягування (Drag)
+-- Плавне перетягування
 local isDragging, dragStart, startPos
 topBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -136,15 +135,13 @@ closeBtn.MouseButton1Click:Connect(function()
         mainFrame:TweenSize(UDim2.new(0, 320, 0, 38), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
         scrollContent.Visible = false
     else
-        mainFrame:TweenSize(UDim2.new(0, 320, 0, 420), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+        mainFrame:TweenSize(UDim2.new(0, 320, 0, 430), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
         task.wait(0.15)
         scrollContent.Visible = true
     end
 end)
 
--- ========================================================
--- Конструктори елементів інтерфейсу
--- ========================================================
+-- Допоміжні конструктори елементів UI
 local function createCategory(name)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 0, 20)
@@ -225,8 +222,89 @@ local function createInput(placeholder, defaultVal, callback)
 end
 
 -- ========================================================
--- Логіка Halloween Авто-фарму
+-- Логіка пошуку локацій та боса
 -- ========================================================
+
+-- Пошук партів телепортації за скріншотами
+local function getBossPlinth()
+    local plaza = Workspace:FindFirstChild("PumpkinPlaza", true)
+    if plaza then
+        local plinth = plaza:FindFirstChild("PlinthTop")
+        if plinth and plinth:IsA("BasePart") then
+            return plinth
+        end
+    end
+    -- Запасний пошук
+    for _, part in ipairs(Workspace:GetDescendants()) do
+        if part.Name == "PlinthTop" and part:IsA("BasePart") then
+            return part
+        end
+    end
+    return nil
+end
+
+local function getFarmGround()
+    local farmPlot = Workspace:FindFirstChild("GraveyardFarmPlot", true)
+    if farmPlot then
+        local ground = farmPlot:FindFirstChild("FarmGround")
+        if ground and ground:IsA("BasePart") then
+            return ground
+        end
+    end
+    -- Запасний пошук
+    for _, part in ipairs(Workspace:GetDescendants()) do
+        if part.Name == "FarmGround" and part:IsA("BasePart") then
+            return part
+        end
+    end
+    return nil
+end
+
+local function getPumpkinBoss()
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj.Name == "HalloweenPumpkinBoss" and obj:IsA("Model") then
+            local hp = obj:GetAttribute("HP")
+            if hp == nil or hp > 0 then
+                return obj
+            end
+        end
+    end
+    return nil
+end
+
+local function teleportTo(part, yOffset)
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if root and part then
+        root.CFrame = part.CFrame + Vector3.new(0, yOffset or 3, 0)
+    end
+end
+
+-- ========================================================
+-- Функції кліку та автофарму
+-- ========================================================
+local function clickTarget(model)
+    local detector = model:FindFirstChildWhichIsA("ClickDetector", true)
+    if typeof(fireclickdetector) == "function" and detector then
+        fireclickdetector(detector)
+        return true
+    end
+
+    local targetPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+    if not targetPart then return false end
+
+    camera.CFrame = CFrame.new(camera.CFrame.Position, targetPart.Position)
+    task.wait(0.04)
+
+    local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+    if onScreen then
+        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 0)
+        task.wait(0.04)
+        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 0)
+        return true
+    end
+    return false
+end
+
 local function getTreesInRadius()
     local char = player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -240,7 +318,7 @@ local function getTreesInRadius()
     local pool = treesFolder and treesFolder:GetChildren() or Workspace:GetDescendants()
 
     for _, item in ipairs(pool) do
-        if item:IsA("Model") and string.find(item.Name, "Halloween") then
+        if item:IsA("Model") and string.find(item.Name, "Halloween") and item.Name ~= "HalloweenPumpkinBoss" then
             local detector = item:FindFirstChildWhichIsA("ClickDetector", true)
             if detector then
                 local hp = item:GetAttribute("HP")
@@ -276,84 +354,103 @@ local function getTreesInRadius()
     return result
 end
 
-local function clickTree(tree)
-    local detector = tree:FindFirstChildWhichIsA("ClickDetector", true)
-    if typeof(fireclickdetector) == "function" and detector then
-        fireclickdetector(detector)
-        return true
-    end
-
-    local targetPart = tree.PrimaryPart or tree:FindFirstChildWhichIsA("BasePart")
-    if not targetPart then return false end
-
-    camera.CFrame = CFrame.new(camera.CFrame.Position, targetPart.Position)
-    task.wait(0.04)
-
-    local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
-    if onScreen then
-        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 0)
-        task.wait(0.04)
-        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 0)
-        return true
-    end
-    return false
-end
-
+-- ========================================================
+-- Основний цикл Авто-фарму з авто-босом
+-- ========================================================
 local function startFarmingLoop()
     while isFarming do
-        local trees = getTreesInRadius()
-        if #trees > 0 then
-            local targetTree = trees[1]
-            local startHp = targetTree:GetAttribute("HP") or 0
-            local attempts = 0
+        -- 1. Перевірка наявності БОСА
+        local boss = getPumpkinBoss()
+        if boss and boss:IsDescendantOf(Workspace) then
+            isBossPhase = true
+            
+            -- Телепорт до PlinthTop
+            local plinth = getBossPlinth()
+            if plinth then
+                teleportTo(plinth, 4)
+            end
+            task.wait(0.3)
 
-            while isFarming and targetTree:IsDescendantOf(Workspace) do
-                local currentHp = targetTree:GetAttribute("HP")
-                if not currentHp or currentHp <= 0 or (startHp > 0 and currentHp < startHp) then
-                    break
-                end
-                clickTree(targetTree)
-                attempts = attempts + 1
-                if attempts > 15 then break end
+            -- Клікаємо по босу, поки він живий
+            while isFarming and boss:IsDescendantOf(Workspace) do
+                local hp = boss:GetAttribute("HP")
+                if hp and hp <= 0 then break end
+
+                clickTarget(boss)
                 task.wait(0.25)
             end
 
-            while isFarming and targetTree:IsDescendantOf(Workspace) do
-                local currentHp = targetTree:GetAttribute("HP")
-                if not currentHp or currentHp <= 0 then break end
-                task.wait(0.25)
+            -- Боса знищено -> телепорт на базу (FarmGround)
+            local ground = getFarmGround()
+            if ground then
+                teleportTo(ground, 3.5)
+            end
+            task.wait(0.5)
+
+            isBossPhase = false
+        end
+
+        -- 2. Звичайний фарм (працює, якщо боса немає)
+        if not isBossPhase then
+            local trees = getTreesInRadius()
+            if #trees > 0 then
+                local targetTree = trees[1]
+                local startHp = targetTree:GetAttribute("HP") or 0
+                local attempts = 0
+
+                while isFarming and targetTree:IsDescendantOf(Workspace) do
+                    -- Якщо під час фарму дерева спавниться бос, перериваємось
+                    if getPumpkinBoss() then break end
+
+                    local currentHp = targetTree:GetAttribute("HP")
+                    if not currentHp or currentHp <= 0 or (startHp > 0 and currentHp < startHp) then
+                        break
+                    end
+                    clickTarget(targetTree)
+                    attempts = attempts + 1
+                    if attempts > 15 then break end
+                    task.wait(0.25)
+                end
+
+                while isFarming and targetTree:IsDescendantOf(Workspace) do
+                    if getPumpkinBoss() then break end
+                    local currentHp = targetTree:GetAttribute("HP")
+                    if not currentHp or currentHp <= 0 then break end
+                    task.wait(0.25)
+                end
             end
         end
-        task.wait(1)
+
+        task.wait(0.5)
     end
 end
 
 -- ========================================================
--- Наповнення меню функціями
+-- Наповнення меню елементами
 -- ========================================================
-
--- Категорія: Фарм
 createCategory("Halloween Event")
 
-createToggle("Авто-фарм гарбузів/дерев", false, function(state)
+createToggle("Авто-фарм + Авто-Бос", false, function(state)
     isFarming = state
     if isFarming then
         startFarmingLoop()
     end
 end)
 
-createButton("Телепорт до найближчого дерева", function()
-    local trees = getTreesInRadius()
-    if #trees > 0 then
-        local targetPart = trees[1].PrimaryPart or trees[1]:FindFirstChildWhichIsA("BasePart")
-        local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-        if targetPart and root then
-            root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 3)
-        end
+createButton("ТП до Боса (PlinthTop)", function()
+    local plinth = getBossPlinth()
+    if plinth then
+        teleportTo(plinth, 4)
     end
 end)
 
--- Категорія: Гравець / Рух
+createButton("ТП на базу (FarmGround)", function()
+    local ground = getFarmGround()
+    if ground then
+        teleportTo(ground, 3.5)
+    end
+end)
+
 createCategory("Персонаж")
 
 createInput("Швидкість (WalkSpeed)", "16", function(val)
@@ -375,11 +472,11 @@ createToggle("Noclip (Крізь стіни)", false, function(state)
     noclipEnabled = state
 end)
 
-createToggle("Infinite Jump (Стрибки у повітрі)", false, function(state)
+createToggle("Infinite Jump (Стрибки)", false, function(state)
     infJumpEnabled = state
 end)
 
--- Обробка Noclip у кожному кадрі
+-- Обробка Noclip
 RunService.Stepped:Connect(function()
     if noclipEnabled and player.Character then
         for _, part in pairs(player.Character:GetDescendants()) do
